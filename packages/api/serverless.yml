@@ -1,0 +1,203 @@
+service: event-platform-api
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  timeout: 30
+  region: ${opt:region, 'us-east-2'}
+  stage: ${opt:stage, 'dev'}
+  environment:
+    USERS_TABLE: ${self:custom.usersTable}
+    EVENTS_TABLE: ${self:custom.eventsTable}
+    REGISTRATIONS_TABLE: ${self:custom.registrationsTable}
+    JWT_SECRET: ${env:JWT_SECRET, 'dev-secret-change-in-production'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:BatchGetItem
+            - dynamodb:BatchWriteItem
+          Resource:
+            - !GetAtt UsersTable.Arn
+            - !GetAtt EventsTable.Arn
+            - !GetAtt RegistrationsTable.Arn
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+          Resource:
+            - !Sub '${UsersTable.Arn}/index/email-index'
+            - !Sub '${EventsTable.Arn}/index/organizer-index'
+            - !Sub '${EventsTable.Arn}/index/date-index'
+            - !Sub '${RegistrationsTable.Arn}/index/user-index'
+
+custom:
+  esbuild:
+    packager: pnpm
+    bundle: true
+    target: node20
+    format: cjs
+    sourcemap: true
+    external:
+      - bcryptjs
+  serverless-offline:
+    httpPort: 3001
+    noTimeout: true
+  usersTable: ${self:service}-users-${self:provider.stage}
+  eventsTable: ${self:service}-events-${self:provider.stage}
+  registrationsTable: ${self:service}-registrations-${self:provider.stage}
+
+functions:
+  auth:
+    handler: src/handlers/auth.handler
+    events:
+      - http:
+          path: /auth/{action}
+          method: post
+          cors: true
+  events:
+    handler: src/handlers/events.handler
+    events:
+      - http:
+          path: /events
+          method: get
+          cors: true
+      - http:
+          path: /events
+          method: post
+          cors: true
+  event:
+    handler: src/handlers/event.handler
+    events:
+      - http:
+          path: /events/{id}
+          method: get
+          cors: true
+      - http:
+          path: /events/{id}
+          method: put
+          cors: true
+      - http:
+          path: /events/{id}
+          method: delete
+          cors: true
+  myEvents:
+    handler: src/handlers/my-events.handler
+    events:
+      - http:
+          path: /me/events
+          method: get
+          cors: true
+  eventRegistrations:
+    handler: src/handlers/event-registrations.handler
+    events:
+      - http:
+          path: /events/{id}/registrations
+          method: get
+          cors: true
+  register:
+    handler: src/handlers/register.handler
+    events:
+      - http:
+          path: /events/{id}/register
+          method: post
+          cors: true
+  unregister:
+    handler: src/handlers/unregister.handler
+    events:
+      - http:
+          path: /events/{id}/unregister
+          method: delete
+          cors: true
+  myRegistrations:
+    handler: src/handlers/my-registrations.handler
+    events:
+      - http:
+          path: /me/registrations
+          method: get
+          cors: true
+
+resources:
+  Resources:
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.usersTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: email-index
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+    EventsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.eventsTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: organizerId
+            AttributeType: S
+          - AttributeName: date
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: organizer-index
+            KeySchema:
+              - AttributeName: organizerId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: date-index
+            KeySchema:
+              - AttributeName: date
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+    RegistrationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.registrationsTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: eventId
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: eventId
+            KeyType: HASH
+          - AttributeName: userId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: user-index
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
